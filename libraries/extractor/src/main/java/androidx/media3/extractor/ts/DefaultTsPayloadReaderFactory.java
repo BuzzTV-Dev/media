@@ -32,6 +32,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Default {@link TsPayloadReader.Factory} implementation. */
@@ -57,7 +58,10 @@ public final class DefaultTsPayloadReaderFactory implements TsPayloadReader.Fact
         FLAG_DETECT_ACCESS_UNITS,
         FLAG_IGNORE_SPLICE_INFO_STREAM,
         FLAG_OVERRIDE_CAPTION_DESCRIPTORS,
-        FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS
+        FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS,
+
+        // Custom flag
+        FLAG_ADD_EMPTY_CC_TRACK
       })
   public @interface Flags {}
 
@@ -108,6 +112,11 @@ public final class DefaultTsPayloadReaderFactory implements TsPayloadReader.Fact
    */
   public static final int FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS = 1 << 6;
 
+  /**
+   * A custom flag to add an empty CC track
+   */
+  public static final int FLAG_ADD_EMPTY_CC_TRACK = 1 << 16;
+
   private static final int DESCRIPTOR_TAG_CAPTION_SERVICE = 0x86;
 
   private final @Flags int flags;
@@ -137,7 +146,12 @@ public final class DefaultTsPayloadReaderFactory implements TsPayloadReader.Fact
    */
   public DefaultTsPayloadReaderFactory(@Flags int flags, List<Format> closedCaptionFormats) {
     this.flags = flags;
-    this.closedCaptionFormats = closedCaptionFormats;
+    if(isSet(FLAG_ADD_EMPTY_CC_TRACK) && closedCaptionFormats.isEmpty()) {
+      this.closedCaptionFormats = Collections.singletonList(
+          new Format.Builder().setSampleMimeType(MimeTypes.APPLICATION_CEA608).build());
+    } else {
+      this.closedCaptionFormats = closedCaptionFormats;
+    }
   }
 
   @Override

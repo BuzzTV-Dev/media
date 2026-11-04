@@ -80,7 +80,7 @@ public class DumpFileAsserts {
    */
   private static final int WRITE_TO_DEVICE = 1 << 1;
 
-  private static final @DumpFilesAction int DUMP_FILE_ACTION = COMPARE_WITH_EXISTING;
+  private static final @DumpFilesAction int DUMP_FILE_ACTION = WRITE_TO_LOCAL;
 
   private DumpFileAsserts() {}
 

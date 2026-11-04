@@ -516,7 +516,7 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
             parseOptionalStringAttr(line, REGEX_PATHWAY_ID, variableDefinitions, matcherCache);
         contentSteeringInfo = new ContentSteeringInfo(serverUri, pathwayId);
       } else if (line.startsWith(TAG_STREAM_INF) || isIFrameOnlyVariant) {
-        noClosedCaptions |= line.contains(ATTR_CLOSED_CAPTIONS_NONE);
+        //noClosedCaptions |= line.contains(ATTR_CLOSED_CAPTIONS_NONE);
         int roleFlags = isIFrameOnlyVariant ? C.ROLE_FLAG_TRICK_PLAY : 0;
         int peakBitrate = parseIntAttr(line, REGEX_BANDWIDTH, matcherCache);
         int averageBitrate = parseOptionalIntAttr(line, REGEX_AVERAGE_BANDWIDTH, -1, matcherCache);
