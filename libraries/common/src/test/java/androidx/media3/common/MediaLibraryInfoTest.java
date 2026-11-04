@@ -32,7 +32,7 @@ import org.junit.runner.RunWith;
 public class MediaLibraryInfoTest {
 
   private static final Pattern VERSION_PATTERN =
-      Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)(?:-(alpha|beta|rc|buzztv)(\\d\\d))?");
+      Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)(?:-(alpha|beta|rc)(\\d\\d))?(?:-buzztv)?");
 
   @Rule public final Expect expect = Expect.create();
 
@@ -74,9 +74,6 @@ public class MediaLibraryInfoTest {
           break;
         case "rc":
           phaseInt = 2;
-          break;
-        case "buzztv":
-          phaseInt = 3;
           break;
         default:
           throw new AssertionError("Unrecognized phase: " + phase);
