@@ -1,0 +1,158 @@
+# Builds the BuzzTV Media3 fork, including the FFmpeg, Opus, FLAC, AV1 and VP9
+# native decoder modules, and publishes every Media3 AAR to this repository's
+# GitHub Packages Maven registry.
+#
+# Published version: <MediaLibraryInfo.VERSION>.<run number>, e.g. 1.11.1-buzztv.42
+# (a re-run of the same workflow run adds the attempt: 1.11.1-buzztv.42.2).
+name: Build and publish BuzzTV Media3
+
+on:
+  push:
+    branches: [buzztv]
+  workflow_dispatch:
+
+concurrency:
+  group: buzztv-publish-${{ github.ref }}
+  # Never cancel a run half-way through uploading packages.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  NDK_VERSION: 28.2.13676358
+  # Hosted runners for private repositories have 7 GB of RAM, less than the
+  # 7 GB heap requested in gradle.properties.
+  GRADLE_DAEMON_JVMARGS: -Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Install Android NDK
+        run: |
+          ndk="$ANDROID_HOME/ndk/${NDK_VERSION}"
+          if [ -f "$ndk/source.properties" ]; then
+            echo "NDK ${NDK_VERSION} already installed"
+          else
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" > /dev/null
+          fi
+          echo "NDK_PATH=$ndk" >> "$GITHUB_ENV"
+
+      - name: Compute version
+        id: version
+        run: |
+          base=$(sed -n 's/.*String VERSION = "\(.*\)";.*/\1/p' \
+            libraries/common/src/main/java/androidx/media3/common/MediaLibraryInfo.java)
+          if ! [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9]+)*$ ]]; then
+            echo "::error::Unexpected VERSION '${base}' in MediaLibraryInfo.java"
+            exit 1
+          fi
+          build="${GITHUB_RUN_NUMBER}"
+          if [ "${GITHUB_RUN_ATTEMPT}" -gt 1 ]; then
+            build="${build}.${GITHUB_RUN_ATTEMPT}"
+          fi
+          echo "version=${base}.${build}" >> "$GITHUB_OUTPUT"
+          echo "Publishing version ${base}.${build}"
+
+      - name: Build FFmpeg
+        run: ./build-ffmpeg.sh
+
+      - name: Check FFmpeg libraries
+        run: |
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            for lib in avcodec avutil swresample; do
+              f="libraries/decoder_ffmpeg/src/main/jni/ffmpeg/android-libs/${abi}/lib${lib}.a"
+              test -s "$f" || { echo "::error::Missing $f"; exit 1; }
+            done
+          done
+
+      - name: Install native build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq meson ninja-build nasm > /dev/null
+
+      - name: Build Opus, FLAC, AV1 and VP9 native libraries
+        run: ./build-native-decoders.sh
+
+      - name: Build AARs into a local Maven repository
+        run: |
+          ./gradlew "-Dorg.gradle.jvmargs=${GRADLE_DAEMON_JVMARGS}" publish \
+            -PpublishVersion="${{ steps.version.outputs.version }}" \
+            -PmavenRepo="${RUNNER_TEMP}/maven-repo" \
+            --stacktrace
+
+      - name: Check decoder AARs contain native libraries
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          repo="${RUNNER_TEMP}/maven-repo/androidx/media3"
+          # artifact:required .so files
+          for entry in \
+              media3-decoder-ffmpeg:ffmpegJNI \
+              media3-decoder-opus:opusV2JNI \
+              media3-decoder-flac:flacJNI \
+              media3-decoder-av1:dav1dJNI \
+              media3-decoder-vp9:vpx,vpxV2JNI \
+              media3-effect-ndk:hardwareBufferJNI; do
+            artifact="${entry%%:*}"
+            aar="${repo}/${artifact}/${version}/${artifact}-${version}.aar"
+            test -s "$aar" || { echo "::error::Missing $aar"; exit 1; }
+            listing=$(unzip -l "$aar")
+            for lib in $(tr ',' ' ' <<< "${entry#*:}"); do
+              for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+                grep -q "jni/${abi}/lib${lib}.so" <<< "$listing" \
+                  || { echo "::error::${artifact} has no jni/${abi}/lib${lib}.so"; exit 1; }
+              done
+            done
+            echo "${artifact}: OK"
+          done
+
+      - name: Upload Maven repository as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: media3-${{ steps.version.outputs.version }}
+          path: ${{ runner.temp }}/maven-repo
+          if-no-files-found: error
+
+      - name: Publish to GitHub Packages
+        env:
+          ORG_GRADLE_PROJECT_mavenRepoUsername: ${{ github.actor }}
+          ORG_GRADLE_PROJECT_mavenRepoPassword: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew "-Dorg.gradle.jvmargs=${GRADLE_DAEMON_JVMARGS}" publish \
+            -PpublishVersion="${{ steps.version.outputs.version }}" \
+            -PmavenRepo="https://maven.pkg.github.com/${{ github.repository }}" \
+            --stacktrace
+
+      - name: Summary
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          {
+            echo "## Published Media3 \`${version}\`"
+            echo
+            echo "Repository: \`https://maven.pkg.github.com/${{ github.repository }}\`"
+            echo
+            echo "All published libraries:"
+            echo
+            echo '```kotlin'
+            find "${RUNNER_TEMP}/maven-repo/androidx/media3" -mindepth 2 -maxdepth 2 -type d -name "${version}" \
+              | awk -F/ '{print $(NF-1)}' | sort \
+              | sed "s/.*/implementation(\"androidx.media3:&:${version}\")/"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          count=$(find "${RUNNER_TEMP}/maven-repo/androidx/media3" -mindepth 2 -maxdepth 2 -type d -name "${version}" | wc -l)
+          echo "Published ${count} libraries"

@@ -13,7 +13,11 @@
 // limitations under the License.
 import java.io.File
 
-plugins { id("media3.android-library") }
+plugins {
+  id("media3.android-library")
+
+  id("media3.publish")
+}
 
 android {
   namespace = "androidx.media3.decoder.flac"
